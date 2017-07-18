@@ -87,6 +87,10 @@ function getRequestedFrames(req: $Request): ?ReactNativeStack {
  * Create an Express middleware for handling React Native symbolication requests
  */
 function create(compiler: *): Middleware {
+  // handle multiple platform
+  if (compiler.compilers) {
+    compiler = compiler.compilers[0]; // eslint-disable-line
+  }
   /**
    * The Express middleware for symbolicatin'.
    */
