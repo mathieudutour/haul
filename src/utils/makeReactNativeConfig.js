@@ -15,6 +15,7 @@ const ProgressBarPlugin = require('progress-bar-webpack-plugin');
 
 const AssetResolver = require('../resolvers/AssetResolver');
 const HasteResolver = require('../resolvers/HasteResolver');
+const moduleResolve = require('../utils/resolveModule');
 
 const getBabelConfig = require('./getBabelConfig');
 
@@ -45,9 +46,13 @@ type WebpackConfigFactory =
 /**
  * Returns default config based on environment
  */
-const getDefaultConfig = (
-  { platform, root, dev, minify, bundle },
-): WebpackConfig => ({
+const getDefaultConfig = ({
+  platform,
+  root,
+  dev,
+  minify,
+  bundle,
+}): WebpackConfig => ({
   context: root,
   entry: [
     /**
@@ -78,7 +83,7 @@ const getDefaultConfig = (
          * The React Native ecosystem publishes untranspiled modules
          * We transpile modules prefixed with react for compatibility
          */
-        exclude: /node_modules\/(?!react|@expo|haul)/,
+        exclude: /node_modules\/(?!react|@expo|pretty-format|haul)/,
         use: {
           loader: require.resolve('happypack/loader'),
           query: { id: 'babel' },
@@ -181,7 +186,7 @@ const getDefaultConfig = (
        * We don't support it, but need to provide a compatibility layer
        */
       new HasteResolver({
-        directories: [path.resolve(root, 'node_modules/react-native')],
+        directories: [moduleResolve(root, 'react-native')],
       }),
       /**
        * This is required by asset loader to resolve extra scales

@@ -11,6 +11,7 @@ const dedent = require('dedent');
 const ora = require('ora');
 const chalk = require('chalk');
 const inquirer = require('inquirer');
+const isReactNativeProject = require('../utils/isReactNativeProject');
 
 const messages = require('../messages');
 
@@ -22,21 +23,7 @@ async function init() {
   const cwd = process.cwd();
 
   // Are we inside a React Native project?
-  let valid = false;
-
-  try {
-    const pak = JSON.parse(
-      fs.readFileSync(path.join(cwd, 'package.json')).toString(),
-    );
-
-    if (pak.dependencies['react-native']) {
-      valid = true;
-    }
-  } catch (e) {
-    // Ignore
-  }
-
-  if (valid) {
+  if (isReactNativeProject(cwd)) {
     progress.succeed(messages.verifiedProject());
   } else {
     progress.fail(messages.invalidProject());
@@ -168,7 +155,9 @@ const addToPackageScripts = async (cwd: string) => {
 
   if (haulScript) {
     ora().info(
-      `Haul already exists in your package.json. Start Haul by running ${getRunScript(haulScript)}'`,
+      `Haul already exists in your package.json. Start Haul by running ${getRunScript(
+        haulScript,
+      )}'`,
     );
     return;
   }
@@ -183,7 +172,8 @@ const addToPackageScripts = async (cwd: string) => {
       {
         type: 'input',
         name: 'scriptName',
-        message: 'Enter the name of the script to add to package.json, e.g. `haul` for `yarn run haul`',
+        message:
+          'Enter the name of the script to add to package.json, e.g. `haul` for `yarn run haul`',
         default: 'haul',
       },
     ]);
@@ -263,7 +253,7 @@ const addToXcodeBuild = async (cwd: string) => {
 
   /**
    * Define Haul integration script in the PBXShellScriptBuildPhase section.
-   * 
+   *
    * This is done by prepending our predefined script phase to the list
    * of all phases.
    */
@@ -283,15 +273,15 @@ const addToXcodeBuild = async (cwd: string) => {
         );
         runOnlyForDeploymentPostprocessing = 0;
         shellPath = /bin/sh;
-        shellScript = "bash ../node_modules/haul-cli/src/utils/haul-integrate.sh";
+        shellScript = "bash ../node_modules/haul/src/utils/haul-integrate.sh";
       };`,
   );
 
   /**
    * Add Haul integration to build phases that already contain `react-native-xcode.sh`
-   * 
+   *
    * We are typically trying to match the following:
-   * 
+   *
    * ```
    *   buildPhases = (
    *     13B07F871A680F5B00A75B9A \/* Sources *\/,
@@ -321,7 +311,9 @@ const addToXcodeBuild = async (cwd: string) => {
     progress.succeed('Added haul to your Xcode build scripts');
   } else {
     progress.fail(
-      `Failed to add Haul to your Xcode build scripts. See: ${chalk.grey('https://github.com/callstack-io/haul/blob/master/docs/Configuring%20Your%20Project.md#integrating-with-xcode')} for manual instructions`,
+      `Failed to add Haul to your Xcode build scripts. See: ${chalk.grey(
+        'https://github.com/callstack-io/haul/blob/master/docs/Configuring%20Your%20Project.md#integrating-with-xcode',
+      )} for manual instructions`,
     );
   }
 };

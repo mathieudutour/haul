@@ -7,7 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-/* global __fbBatchedBridge, self, importScripts, postMessage, onmessage: true */
+/* global __fbBatchedBridge, self, importScripts, postMessage, onmessage: true */ // eslint-disable-line
 
 /* eslint-disable */
 
@@ -15,6 +15,10 @@
 
 onmessage = (function() {
   let visibilityState;
+
+  const messageQueue = [];
+  let shouldQueueMessages = false;
+
   const showVisibilityWarning = (function() {
     let hasWarned = false;
     return function() {
@@ -30,18 +34,37 @@ onmessage = (function() {
     };
   })();
 
+  const processEnqueuedMessages = function() {
+    while (messageQueue.length) {
+      const messageProcess = messageQueue.shift();
+      messageProcess();
+    }
+    shouldQueueMessages = false;
+  };
+
   const messageHandlers = {
     executeApplicationScript(message, sendReply) {
       for (const key in message.inject) {
         self[key] = JSON.parse(message.inject[key]);
       }
-      let error;
-      try {
-        importScripts(message.url);
-      } catch (err) {
-        error = JSON.stringify(err);
+
+      shouldQueueMessages = true;
+
+      function evalJS(js) {
+        try {
+          eval(
+            js
+              .replace(/this\["webpackHotUpdate"\]/g, 'self["webpackHotUpdate"]')
+          );
+        } catch (e) {
+          self.ErrorUtils.reportFatalError(e);
+        } finally {
+          self.postMessage({ replyID: message.id });
+          processEnqueuedMessages();
+        }
       }
-      sendReply(null /* result */, error);
+
+      fetch(message.url).then(resp => resp.text()).then(evalJS);
     },
     setDebuggerVisibility(message) {
       visibilityState = message.visibilityState;
@@ -49,32 +72,43 @@ onmessage = (function() {
   };
 
   return function(message) {
-    if (visibilityState === 'hidden') {
-      showVisibilityWarning();
-    }
+    const processMessage = function() {
+      if (visibilityState === 'hidden') {
+        showVisibilityWarning();
+      }
 
-    const obj = message.data;
+      const obj = message.data;
 
-    const sendReply = function(result, error) {
-      postMessage({ replyID: obj.id, result, error });
+      const sendReply = function(result, error) {
+        postMessage({ replyID: obj.id, result, error });
+      };
+
+      const handler = messageHandlers[obj.method];
+
+      // Special cased handlers
+      if (handler) {
+        handler(obj, sendReply);
+        return;
+      }
+
+      // Other methods get called on the bridge
+      let returnValue = [[], [], [], 0];
+      try {
+        if (typeof __fbBatchedBridge === 'object') {
+          returnValue = __fbBatchedBridge[obj.method].apply(
+            null,
+            obj.arguments,
+          );
+        }
+      } finally {
+        sendReply(JSON.stringify(returnValue));
+      }
     };
 
-    const handler = messageHandlers[obj.method];
-
-    // Special cased handlers
-    if (handler) {
-      handler(obj, sendReply);
-      return;
-    }
-
-    // Other methods get called on the bridge
-    let returnValue = [[], [], [], 0];
-    try {
-      if (typeof __fbBatchedBridge === 'object') {
-        returnValue = __fbBatchedBridge[obj.method].apply(null, obj.arguments);
-      }
-    } finally {
-      sendReply(JSON.stringify(returnValue));
+    if (shouldQueueMessages) {
+      messageQueue.push(processMessage);
+    } else {
+      processMessage();
     }
   };
 })();

@@ -24,6 +24,7 @@ const path = require('path');
 const delve = require('dlv');
 const messages = require('../../messages');
 const logger = require('../../logger');
+const getCompilerByPlatform = require('../../utils/getCompilerByPlatform');
 
 type ReactNativeSymbolicateRequest = {
   stack: ReactNativeStack,
@@ -47,8 +48,8 @@ function createSourceMapConsumer(compiler: *) {
   const base = delve(compiler.outputFileSystem.data, hops);
 
   // grab the Buffer for the source map
-  const sourceMapBuffer = base &&
-    base[`${compiler.options.output.filename}.map`];
+  const sourceMapBuffer =
+    base && base[`${compiler.options.output.filename}.map`];
 
   // we stop here if we couldn't find that map
   if (!sourceMapBuffer) {
@@ -74,36 +75,63 @@ function getRequestedFrames(req: $Request): ?ReactNativeStack {
     return null;
   }
 
+  let stack;
+
   try {
     const payload: ReactNativeSymbolicateRequest = JSON.parse(req.rawBody);
-    return payload.stack;
+    stack = payload.stack;
   } catch (err) {
     // should happen, but at least we won't die
-    return null;
+    stack = null;
   }
+
+  if (!stack) return null;
+
+  const newStack = stack.filter(stackLine => {
+    const { methodName } = stackLine;
+    const unwantedStackRegExp = new RegExp(
+      /(__webpack_require__|haul|eval(JS){0,1})/,
+    );
+
+    if (unwantedStackRegExp.test(methodName)) return false; // we don't need those
+
+    const evalLine = methodName.indexOf('Object../');
+    if (evalLine > -1) {
+      const newMethodName = methodName.slice(evalLine + 9); // removing this prefix in method names
+      stackLine.methodName = newMethodName; // eslint-disable-line
+    }
+    return true;
+  });
+
+  return newStack;
 }
 
 /**
  * Create an Express middleware for handling React Native symbolication requests
  */
-function create(compiler: *): Middleware {
-  // handle multiple platform
-  if (compiler.compilers) {
-    compiler = compiler.compilers[0]; // eslint-disable-line
-  }
+function create(webpackCompiler: *): Middleware {
   /**
    * The Express middleware for symbolicatin'.
    */
   function symbolicateMiddleware(req: $Request, res, next) {
     if (req.path !== '/symbolicate') return next();
 
-    // grab our source map consumer
-    const consumer = createSourceMapConsumer(compiler);
-    if (!consumer) return next();
-
     // grab the source stack frames
     const unconvertedFrames = getRequestedFrames(req);
     if (!unconvertedFrames) return next();
+
+    // grab the platform from the first frame (e.g. index.ios.bundle?platform=ios&dev=true&minify=false:69825:16)
+    const platformMatch = unconvertedFrames[0].file.match(
+      /platform=([a-zA-Z]*)/,
+    );
+    const platform: ?string = platformMatch && platformMatch[1];
+
+    // grab the appropriate webpack compiler
+    const compiler = getCompilerByPlatform(webpackCompiler, platform);
+
+    // grab our source map consumer
+    const consumer = createSourceMapConsumer(compiler);
+    if (!consumer) return next();
 
     // the base directory
     const root = compiler.options.context;
